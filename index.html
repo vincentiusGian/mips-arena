@@ -59,8 +59,8 @@
         </div>
       </section>
 
-      <aside class="side-panel">
-        <section class="io-panel">
+      <aside class="side-panel" id="sidePanel" data-io-mode="split">
+        <section class="io-panel" id="inputPanel">
           <div class="panel-bar">
             <span class="panel-title">Custom Input</span>
             <span class="panel-note" id="inputMeta">0 values</span>
@@ -70,10 +70,16 @@
 
         <section class="io-panel">
           <div class="panel-bar">
-            <span class="panel-title">Program Output</span>
+            <span class="panel-title" id="consoleTitle">Program Output</span>
+            <div class="spacer"></div>
+            <button class="btn subtle" id="ioModeBtn" aria-pressed="false" title="Toggle terminal mode">Terminal</button>
             <button class="btn subtle" id="clearOutput">Clear</button>
           </div>
           <pre id="consoleOutput" aria-live="polite"></pre>
+          <div class="terminal-input-row" id="terminalRow" hidden>
+            <span class="terminal-prompt">&gt;</span>
+            <input id="terminalInput" type="text" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" aria-label="Terminal input" placeholder="Enter value, then press Enter">
+          </div>
         </section>
 
         <section class="io-panel inspect-panel">
@@ -109,6 +115,8 @@
             <div class="isa-item"><code>Custom Input</code><span>Numbers separated by spaces or newlines. All numbers are queued for <code>syscall 5</code>.</span></div>
             <div class="isa-item"><code>input</code><span>If <code>.data</code> defines an <code>input</code> label, the numbers are also stored as words at that label.</span></div>
             <div class="isa-item"><code>$a0, $a1</code><span>The number of values and the address of the <code>input</code> label are set automatically before the program starts.</span></div>
+            <div class="isa-item"><code>Terminal mode</code><span>Toggle with the <code>Terminal</code>/<code>Split</code> button above the output panel. Input and output share one terminal.</span></div>
+            <div class="isa-item"><code>Interactive input</code><span><code>syscall 5</code> pauses and asks for a value; type it and press Enter instead of filling Custom Input first.</span></div>
           </section>
 
           <section class="isa-section">

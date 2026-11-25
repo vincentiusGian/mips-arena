@@ -84,6 +84,22 @@ test('loadInput fills the syscall queue and input label', () => {
   assert.equal(machine.output.join(''), '17');
 });
 
+test('syscall 5 waits for interactive input before continuing', () => {
+  const program = build('main:\n li $v0, 5\n syscall\n move $t0, $v0\n li $v0, 5\n syscall\n add $t1, $t0, $v0\n li $v0, 1\n move $a0, $t1\n syscall\n halt\n');
+  const machine = new core.Machine(program);
+  machine.step();
+  const wait = machine.step();
+  assert.equal(wait.waitingForInput, true);
+  assert.equal(machine.pc, 1);
+  assert.equal(machine.step().waitingForInput, true);
+  assert.equal(machine.pc, 1);
+  assert.equal(machine.provideInput([10, 7]), true);
+  assert.equal(machine.waitingForInput, false);
+  const result = machine.runSync(20);
+  assert.equal(result.waitingForInput, false);
+  assert.equal(machine.output.join(''), '17');
+});
+
 test('instruction limit raises an error', () => {
   const machine = new core.Machine(build('main:\nloop:\n j loop\n'));
   assert.throws(() => machine.runSync(25), /Instruction limit exceeded \(25 steps\)/);

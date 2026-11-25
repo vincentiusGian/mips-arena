@@ -429,6 +429,7 @@
       this.memory = new Map();
       this.lastChanged = [];
       this.inputIndex = 0;
+      this.waitingForInput = false;
       this.regs[29] = STACK_BASE;
       this.regs[28] = DATA_BASE + 0x800;
       for (const segment of this.program.dataSegments) {
@@ -537,6 +538,9 @@
       const instruction = this.program.instructions[this.pc];
       const args = instruction.args;
       const line = instruction.line;
+      if (this.waitingForInput) {
+        return { halted: false, line, changed: [], outputDelta: '', waitingForInput: true };
+      }
       const outputBefore = this.output.length;
       this.lastChanged = [];
       let next = this.pc + 1;
@@ -721,7 +725,15 @@
             break;
 
           case 'syscall':
-            this.executeSyscall();
+            if (this.executeSyscall() === false) {
+              return {
+                halted: false,
+                line,
+                changed: [],
+                outputDelta: this.output.slice(outputBefore).join(''),
+                waitingForInput: true
+              };
+            }
             break;
 
           case 'li':
@@ -800,26 +812,42 @@
         this.halted = true;
         this.reason = 'syscall exit';
       } else if (code === 5) {
+        if (this.inputQueue.length <= this.inputIndex) {
+          this.waitingForInput = true;
+          return false;
+        }
         const input = this.inputQueue[this.inputIndex++];
-        this.writeReg(2, input === undefined ? 0 : toInt32(input));
+        this.writeReg(2, toInt32(input));
       } else if (code === 9) {
         this.writeReg(2, this.program.constants.DATA_BASE + this.steps * 4);
       }
+      return true;
+    }
+
+    provideInput(values) {
+      const list = Array.isArray(values) ? values : [values];
+      list.forEach(value => this.inputQueue.push(toInt32(value)));
+      if (this.waitingForInput && this.inputQueue.length > this.inputIndex) {
+        this.waitingForInput = false;
+        return true;
+      }
+      return false;
     }
 
     runSync(maxSteps) {
       let count = 0;
-      while (!this.halted && count < maxSteps) {
+      while (!this.halted && !this.waitingForInput && count < maxSteps) {
         this.step();
         count++;
       }
-      if (!this.halted && count >= maxSteps) {
+      if (!this.halted && !this.waitingForInput && count >= maxSteps) {
         throw new RuntimeError('Instruction limit exceeded (' + maxSteps + ' steps)', undefined, ERROR_CODES.LIMIT);
       }
       return {
         steps: this.steps,
         output: this.output.join(''),
-        reason: this.reason
+        reason: this.reason,
+        waitingForInput: this.waitingForInput
       };
     }
   }

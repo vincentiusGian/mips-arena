@@ -9,9 +9,10 @@
   const LS_TEMPLATE = 'mips-ide.template';
   const LS_THEME = 'mips-ide.theme';
   const LS_ISA = 'mips-ide.isa';
+  const LS_IO_MODE = 'mips-ide.ioMode';
 
   const TEMPLATES = {
-    dasar: `# Read three integers from Custom Input, then print their sum
+    dasar: `# Read three integers (Custom Input or Terminal), then print their sum
 .text
 .globl main
 main:
@@ -81,7 +82,10 @@ done:
     memoryBase: '0x10010000',
     memoryAddress: core.constants.DATA_BASE,
     saveTimer: null,
-    inputTimer: null
+    inputTimer: null,
+    ioMode: 'split',
+    terminalQueue: [],
+    resumeAfterInput: false
   };
 
   function escapeHtml(value) {
@@ -179,6 +183,64 @@ done:
     el('inputMeta').textContent = `${parsed.values.length} values${suffix}`;
   }
 
+  function runtimeInput() {
+    return state.ioMode === 'terminal' ? '' : el('inputText').value;
+  }
+
+  function applyIoMode(persist) {
+    const split = state.ioMode === 'split';
+    el('sidePanel').dataset.ioMode = state.ioMode;
+    el('inputPanel').hidden = !split;
+    el('terminalRow').hidden = split;
+    el('consoleTitle').textContent = split ? 'Program Output' : 'Terminal';
+    el('ioModeBtn').textContent = split ? 'Terminal' : 'Split';
+    el('ioModeBtn').setAttribute('aria-pressed', String(!split));
+    if (persist !== false) localStorage.setItem(LS_IO_MODE, state.ioMode);
+    if (!split && state.session && state.session.machine.waitingForInput) {
+      el('terminalInput').focus();
+    }
+  }
+
+  function toggleIoMode() {
+    stopRun();
+    state.session = null;
+    state.terminalQueue = [];
+    state.resumeAfterInput = false;
+    state.ioMode = state.ioMode === 'split' ? 'terminal' : 'split';
+    applyIoMode();
+    setCurrentLine(null);
+    setRunStatus('Ready');
+  }
+
+  function submitTerminalInput() {
+    const raw = el('terminalInput').value;
+    if (!raw.trim()) return;
+    el('terminalInput').value = '';
+    logOutput('> ' + raw + '\n', 'in');
+    const parsed = core.parseInput(raw);
+    if (parsed.errors.length) {
+      const first = parsed.errors[0];
+      logOutput(`Invalid input [${first.code}] at position ${first.index + 1}: ${first.message}\n`, 'err');
+      return;
+    }
+    const machine = state.session && state.session.machine;
+    if (machine) {
+      machine.provideInput(parsed.values);
+    } else {
+      state.terminalQueue.push(...parsed.values);
+    }
+    if (machine && machine.waitingForInput) {
+      el('terminalInput').focus();
+      return;
+    }
+    if (state.resumeAfterInput) {
+      state.resumeAfterInput = false;
+      startLoop();
+    } else if (!state.running) {
+      setRunStatus('Ready to step');
+    }
+  }
+
   function stopRun() {
     state.running = false;
     if (state.raf) cancelAnimationFrame(state.raf);
@@ -210,7 +272,7 @@ done:
     const program = state.program;
     if (!program) return;
     const machine = new core.Machine(program);
-    core.loadInput(machine, program, el('inputText').value);
+    core.loadInput(machine, program, runtimeInput());
     state.displayMachine = machine;
     updateRegisters();
     updateMemory();
@@ -220,10 +282,15 @@ done:
     stopRun();
     state.outputLines = [];
     renderOutput();
+    state.resumeAfterInput = false;
     const program = assembleNow(true);
     if (!program) return null;
     const machine = new core.Machine(program);
-    core.loadInput(machine, program, el('inputText').value);
+    core.loadInput(machine, program, runtimeInput());
+    if (state.terminalQueue.length) {
+      machine.inputQueue.push(...state.terminalQueue);
+      state.terminalQueue = [];
+    }
     state.session = { machine, program };
     state.displayMachine = machine;
     setCurrentLine(null);
@@ -276,6 +343,8 @@ done:
     const machine = state.session.machine;
     const changed = new Set();
     let stoppedByBreakpoint = false;
+    let waitingForInput = false;
+    let promptShown = machine.waitingForInput;
 
     while (budget-- > 0 && !machine.halted) {
       let result;
@@ -286,6 +355,12 @@ done:
         return;
       }
       appendStdout(result.outputDelta);
+      if (result.waitingForInput) {
+        waitingForInput = true;
+        if (!promptShown && state.ioMode === 'terminal') logOutput('? ', 'prompt');
+        promptShown = true;
+        break;
+      }
       result.changed.forEach(index => changed.add(index));
       setCurrentLine(result.line);
       if (state.breakpoints.has(result.line)) {
@@ -298,6 +373,14 @@ done:
     updateMemory();
     updateStats();
 
+    if (waitingForInput) {
+      stopRun();
+      state.resumeAfterInput = true;
+      updateStats();
+      setRunStatus('Waiting for input');
+      if (state.ioMode === 'terminal') el('terminalInput').focus();
+      return;
+    }
     if (machine.halted) { finishSession(); return; }
     if (stoppedByBreakpoint) {
       stopRun();
@@ -324,7 +407,14 @@ done:
       setRunStatus('Paused');
       return;
     }
-    if (!ensureSession()) return;
+    const session = ensureSession();
+    if (!session) return;
+    if (session.machine.waitingForInput) {
+      state.resumeAfterInput = true;
+      setRunStatus('Waiting for input');
+      if (state.ioMode === 'terminal') el('terminalInput').focus();
+      return;
+    }
     startLoop();
   }
 
@@ -338,6 +428,7 @@ done:
     stopRun();
     const session = ensureSession();
     if (!session) return;
+    const wasWaiting = session.machine.waitingForInput;
     let result;
     try {
       result = session.machine.step();
@@ -346,11 +437,20 @@ done:
       return;
     }
     appendStdout(result.outputDelta);
+    if (result.waitingForInput) {
+      if (!wasWaiting && state.ioMode === 'terminal') logOutput('? ', 'prompt');
+      state.resumeAfterInput = false;
+      updateRegisters(new Set(result.changed));
+      updateStats();
+      setRunStatus('Waiting for input');
+      if (state.ioMode === 'terminal') el('terminalInput').focus();
+      return;
+    }
     setCurrentLine(result.line);
     updateRegisters(new Set(result.changed));
     updateMemory();
     updateStats();
-    setRunStatus(result.halted ? 'Selesai' : 'Step');
+    setRunStatus(result.halted ? 'Finished' : 'Step');
     if (session.machine.halted) finishSession();
   }
 
@@ -539,6 +639,12 @@ done:
       state.outputLines = [];
       renderOutput();
     });
+    el('ioModeBtn').addEventListener('click', toggleIoMode);
+    el('terminalInput').addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      submitTerminalInput();
+    });
     el('speed').addEventListener('input', updateSpeedLabel);
 
     el('templateSelect').addEventListener('change', event => loadTemplate(event.target.value));
@@ -597,6 +703,8 @@ done:
     applyTheme(savedTheme === 'light' || savedTheme === 'dark'
       ? savedTheme
       : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+    state.ioMode = localStorage.getItem(LS_IO_MODE) === 'terminal' ? 'terminal' : 'split';
+    applyIoMode(false);
     buildRegisterGrid();
     bindEvents();
     updateSpeedLabel();
