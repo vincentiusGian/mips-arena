@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MIPS IDE — Assembler & Simulator</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name">MIPS IDE</span>
+        <span class="brand-sub">MIPS32 assembler · simulator</span>
+      </div>
+      <div class="topbar-actions">
+        <label class="field-label" for="templateSelect">Template</label>
+        <select id="templateSelect">
+          <option value="dasar">Basic — syscalls</option>
+          <option value="array">Array — memory</option>
+        </select>
+        <button class="btn" id="isaBtn" aria-pressed="false" aria-label="Open ISA reference" title="ISA reference">
+          <span class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+        <button class="btn" id="themeBtn">Light</button>
+      </div>
+    </header>
+
+    <main class="ide" id="ide">
+      <section class="editor-panel">
+        <div class="panel-bar">
+          <span class="panel-title">main.asm</span>
+          <span class="assembler-status" id="assemblerStatus">Ready</span>
+          <div class="spacer"></div>
+          <button class="btn primary" id="runBtn">Run</button>
+          <button class="btn" id="pauseBtn" disabled>Pause</button>
+          <button class="btn" id="stepBtn">Step</button>
+          <button class="btn" id="resetBtn">Reset</button>
+          <label class="field-label" for="speed">Speed</label>
+          <input type="range" id="speed" min="0" max="100" value="45">
+          <span class="speed-value" id="speedLabel">500/s</span>
+        </div>
+
+        <div class="editor-wrap">
+          <div class="gutter" id="gutter"></div>
+          <div class="code-area">
+            <div class="current-line" id="currentLine"></div>
+            <pre id="highlight" aria-hidden="true"></pre>
+            <textarea id="editor" wrap="off" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" aria-label="MIPS assembly editor"></textarea>
+          </div>
+        </div>
+
+        <div class="statusbar">
+          <span id="runStatus">Ready</span>
+          <span id="pcStatus">PC 0x00400000</span>
+          <span id="instrStatus">0 instructions</span>
+          <span id="rateStatus">0 instr/s</span>
+          <span class="status-note">Click a line number to toggle a breakpoint</span>
+        </div>
+      </section>
+
+      <aside class="side-panel">
+        <section class="io-panel">
+          <div class="panel-bar">
+            <span class="panel-title">Custom Input</span>
+            <span class="panel-note" id="inputMeta">0 values</span>
+          </div>
+          <textarea id="inputText" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" aria-label="Program input"></textarea>
+        </section>
+
+        <section class="io-panel">
+          <div class="panel-bar">
+            <span class="panel-title">Program Output</span>
+            <button class="btn subtle" id="clearOutput">Clear</button>
+          </div>
+          <pre id="consoleOutput" aria-live="polite"></pre>
+        </section>
+
+        <section class="io-panel inspect-panel">
+          <div class="panel-bar tabs" id="tabs">
+            <button class="tab active" data-tab="registers">Registers</button>
+            <button class="tab" data-tab="memory">Memory</button>
+          </div>
+          <div class="inspect-content" id="tab-registers">
+            <div class="register-grid" id="registerGrid"></div>
+          </div>
+          <div class="inspect-content" id="tab-memory" hidden>
+            <div class="memory-bar">
+              <label class="field-label" for="memoryBase">Address</label>
+              <input id="memoryBase" type="text" value="0x10010000" spellcheck="false">
+              <button class="btn subtle" id="memoryPrev">−128</button>
+              <button class="btn subtle" id="memoryNext">+128</button>
+            </div>
+            <div class="memory-grid" id="memoryView"></div>
+          </div>
+        </section>
+      </aside>
+
+      <div class="isa-backdrop" id="isaBackdrop" hidden></div>
+      <aside class="isa-panel" id="isaPanel" hidden aria-label="ISA reference">
+        <div class="panel-bar">
+          <span class="panel-title">ISA Reference</span>
+          <button class="btn subtle" id="isaClose">Close</button>
+        </div>
+        <input id="isaSearch" type="search" placeholder="Search instructions..." spellcheck="false" aria-label="Search instructions">
+        <div class="isa-body" id="isaBody">
+          <section class="isa-section">
+            <h3>Input conventions</h3>
+            <div class="isa-item"><code>Custom Input</code><span>Numbers separated by spaces or newlines. All numbers are queued for <code>syscall 5</code>.</span></div>
+            <div class="isa-item"><code>input</code><span>If <code>.data</code> defines an <code>input</code> label, the numbers are also stored as words at that label.</span></div>
+            <div class="isa-item"><code>$a0, $a1</code><span>The number of values and the address of the <code>input</code> label are set automatically before the program starts.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Registers</h3>
+            <div class="isa-item"><code>$zero</code><span>Always 0; writes are ignored.</span></div>
+            <div class="isa-item"><code>$at</code><span>Assembler temporary.</span></div>
+            <div class="isa-item"><code>$v0–$v1</code><span>Result values; <code>$v0</code> also holds the syscall number.</span></div>
+            <div class="isa-item"><code>$a0–$a3</code><span>Arguments. <code>$a0</code>/<code>$a1</code> hold input information.</span></div>
+            <div class="isa-item"><code>$t0–$t9</code><span>Temporaries; free to use.</span></div>
+            <div class="isa-item"><code>$s0–$s7</code><span>Saved registers; free to use in this simulator.</span></div>
+            <div class="isa-item"><code>$gp, $sp, $fp</code><span>Global, stack, and frame pointers. <code>$sp</code> starts at 0x7fffe000.</span></div>
+            <div class="isa-item"><code>$ra</code><span>Return address for <code>jal</code>/<code>jalr</code>.</span></div>
+            <div class="isa-item"><code>hi, lo</code><span>Results of <code>mult</code>/<code>div</code>; read with <code>mfhi</code>/<code>mflo</code>.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Arithmetic</h3>
+            <div class="isa-item"><code>add $rd,$rs,$rt</code><span>Signed addition; overflow raises an error.</span></div>
+            <div class="isa-item"><code>addu $rd,$rs,$rt</code><span>Addition without overflow checking.</span></div>
+            <div class="isa-item"><code>sub $rd,$rs,$rt</code><span>Signed subtraction; overflow raises an error.</span></div>
+            <div class="isa-item"><code>subu $rd,$rs,$rt</code><span>Subtraction without overflow checking.</span></div>
+            <div class="isa-item"><code>addi $rt,$rs,imm</code><span>Add a 16-bit immediate; overflow is checked.</span></div>
+            <div class="isa-item"><code>addiu $rt,$rs,imm</code><span>Add an immediate without overflow checking.</span></div>
+            <div class="isa-item"><code>mult $rs,$rt</code><span>64-bit result stored in <code>hi</code> and <code>lo</code>.</span></div>
+            <div class="isa-item"><code>multu $rs,$rt</code><span>Unsigned multiplication.</span></div>
+            <div class="isa-item"><code>div $rs,$rt</code><span>Signed division: quotient in <code>lo</code>, remainder in <code>hi</code>.</span></div>
+            <div class="isa-item"><code>divu $rs,$rt</code><span>Unsigned division.</span></div>
+            <div class="isa-item"><code>mfhi $rd / mflo $rd</code><span>Copy <code>hi</code> or <code>lo</code> into a register.</span></div>
+            <div class="isa-item"><code>lui $rt,imm</code><span>Load the upper 16 bits of a register with an immediate.</span></div>
+            <div class="isa-item"><code>neg / negu $rd,$rs</code><span>Signed / unsigned negation.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Logic, shifts, and comparisons</h3>
+            <div class="isa-item"><code>and or xor nor $rd,$rs,$rt</code><span>32-bit bitwise operations.</span></div>
+            <div class="isa-item"><code>andi ori xori $rt,$rs,imm</code><span>Bitwise operations with an immediate.</span></div>
+            <div class="isa-item"><code>slt $rd,$rs,$rt</code><span>1 if <code>$rs &lt; $rt</code> (signed).</span></div>
+            <div class="isa-item"><code>sltu $rd,$rs,$rt</code><span>Unsigned comparison.</span></div>
+            <div class="isa-item"><code>slti / sltiu $rt,$rs,imm</code><span>Compare with an immediate.</span></div>
+            <div class="isa-item"><code>sll / srl / sra $rd,$rt,sh</code><span>Left shift, logical right shift, arithmetic right shift.</span></div>
+            <div class="isa-item"><code>sllv / srlv / srav</code><span>Shift by an amount from a register.</span></div>
+            <div class="isa-item"><code>not $rd,$rs</code><span>Bitwise inversion.</span></div>
+            <div class="isa-item"><code>seq / sne $rd,$rs,$rt</code><span>1 if equal / not equal.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Memory</h3>
+            <div class="isa-item"><code>lw $rt,off($base)</code><span>Load a 32-bit word; the address must be a multiple of 4.</span></div>
+            <div class="isa-item"><code>sw $rt,off($base)</code><span>Store a 32-bit word.</span></div>
+            <div class="isa-item"><code>lb / lbu $rt,off($base)</code><span>Load signed / unsigned byte.</span></div>
+            <div class="isa-item"><code>sb $rt,off($base)</code><span>Store the low byte.</span></div>
+            <div class="isa-item"><code>lh / lhu / sh</code><span>Load/store a 16-bit halfword.</span></div>
+            <div class="isa-item"><code>la $rt,label</code><span>Load a label address into a register.</span></div>
+            <div class="isa-item"><code>li $rt,value</code><span>Load a constant or label address.</span></div>
+            <div class="isa-item"><code>move $rd,$rs</code><span>Copy a register.</span></div>
+            <div class="isa-item"><code>label($reg)</code><span>Address = label address + register value, e.g. <code>arr($t0)</code>.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Control flow</h3>
+            <div class="isa-item"><code>beq / bne $rs,$rt,label</code><span>Branch if equal / not equal.</span></div>
+            <div class="isa-item"><code>blt / ble / bgt / bge</code><span>Signed branches: &lt;, &lt;=, &gt;, &gt;=.</span></div>
+            <div class="isa-item"><code>blez / bgtz / bltz / bgez</code><span>Branch based on the sign of <code>$rs</code>.</span></div>
+            <div class="isa-item"><code>beqz / bnez $rs,label</code><span>Branch if zero / non-zero.</span></div>
+            <div class="isa-item"><code>j label</code><span>Unconditional jump.</span></div>
+            <div class="isa-item"><code>jal label</code><span>Jump and save the return address in <code>$ra</code>.</span></div>
+            <div class="isa-item"><code>jr $rs / jalr $rs</code><span>Jump to an address held in a register.</span></div>
+            <div class="isa-item"><code>halt</code><span>Stop the simulation without changing registers.</span></div>
+            <div class="isa-item"><code>nop</code><span>No operation.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Data directives</h3>
+            <div class="isa-item"><code>.data / .text</code><span>Start the data / code segment.</span></div>
+            <div class="isa-item"><code>.globl main</code><span>Ignored; execution starts at the <code>main</code> label.</span></div>
+            <div class="isa-item"><code>.word / .half / .byte</code><span>Store 32/16/8-bit values; multiple values are allowed.</span></div>
+            <div class="isa-item"><code>.asciiz / .ascii</code><span>Strings, with / without a null terminator.</span></div>
+            <div class="isa-item"><code>.space n / .zero n</code><span>Reserve <code>n</code> zero bytes.</span></div>
+            <div class="isa-item"><code>.align n</code><span>Align the data address to 2^n bytes.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Syscalls</h3>
+            <div class="isa-item"><code>$v0=1</code><span>Print the integer in <code>$a0</code>.</span></div>
+            <div class="isa-item"><code>$v0=4</code><span>Print the string at address <code>$a0</code>.</span></div>
+            <div class="isa-item"><code>$v0=5</code><span>Read the next integer from Custom Input into <code>$v0</code>.</span></div>
+            <div class="isa-item"><code>$v0=9</code><span>Simple memory allocation.</span></div>
+            <div class="isa-item"><code>$v0=10</code><span>Exit the program.</span></div>
+            <div class="isa-item"><code>$v0=11</code><span>Print one character from <code>$a0</code>.</span></div>
+          </section>
+
+          <section class="isa-section">
+            <h3>Shortcuts</h3>
+            <div class="isa-item"><code>F5</code><span>Run or pause.</span></div>
+            <div class="isa-item"><code>F10</code><span>Execute one instruction.</span></div>
+            <div class="isa-item"><code>Ctrl+Enter</code><span>Run from the start.</span></div>
+            <div class="isa-item"><code>Tab</code><span>Indent by four spaces.</span></div>
+          </section>
+        </div>
+        <div class="isa-empty" id="isaEmpty" hidden>No matching instructions.</div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="emulator.js"></script>
+  <script src="ui-utils.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
