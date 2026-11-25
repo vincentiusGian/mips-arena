@@ -29,16 +29,6 @@ test('assembler uses MARS-style symbol and operand errors', () => {
   assert.match(arity.errors[0].message, /Too many or incorrectly formatted operands/);
 });
 
-test('assembler accepts MARS-style whitespace-separated operands', () => {
-  const program = build('.data\nmsg: .asciiz "hi"\n.text\nmain:\n li $v0 4\n la $a0 msg\n syscall\n');
-  assert.equal(program.errors.length, 0);
-  assert.deepEqual(program.instructions.map(i => i.op), ['li', 'la', 'syscall']);
-
-  const machine = new core.Machine(program);
-  machine.runSync(10);
-  assert.equal(machine.output.join(''), 'hi');
-});
-
 test('add detects overflow, addu wraps', () => {
   const trap = new core.Machine(build('main:\n li $t0, 2147483647\n add $t1, $t0, $t0\n halt\n'));
   trap.step();

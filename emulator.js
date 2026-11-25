@@ -132,8 +132,8 @@
       if (!inString) {
         if (ch === '(') depth++;
         if (ch === ')') depth--;
-        if ((ch === ',' || /\s/.test(ch)) && depth === 0) {
-          if (current.trim()) parts.push(current.trim());
+        if (ch === ',' && depth === 0) {
+          parts.push(current.trim());
           current = '';
           continue;
         }
